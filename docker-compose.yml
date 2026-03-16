@@ -1,0 +1,39 @@
+services:
+  interactions-service:
+    build: .
+    container_name: venus-interactions-service
+    ports:
+      - "8002:8002"
+    env_file: .env
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - default
+      - crm_network
+
+  db:
+    image: postgres:15
+    container_name: venus-interactions-db
+    environment:
+      POSTGRES_DB: crm_interactions_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - interactions_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  interactions_postgres_data:
+
+networks:
+  crm_network:
+    external: true
