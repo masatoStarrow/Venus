@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 8002
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002", "--reload", "--workers", "1"]
+CMD ["gunicorn", "main:app", "--bind", "0.0.0.0:8002", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker"]
