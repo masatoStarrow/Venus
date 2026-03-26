@@ -9,4 +9,6 @@ COPY . .
 
 EXPOSE 8002
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002", "--reload", "--workers", "1"]
+RUN chmod +x entrypoint.sh
+
+ENTRYPOINT ["bash", "./entrypoint.sh"]
