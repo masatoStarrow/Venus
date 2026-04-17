@@ -9,8 +9,15 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
+# Import settings to get the database URL from environment variables
+from config.settings import settings
+
 # Alembic Config object
 config = context.config
+
+# Override the sqlalchemy.url from alembic.ini with the value from settings
+# This ensures Alembic uses the same database connection as the application
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
