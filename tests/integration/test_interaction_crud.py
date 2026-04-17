@@ -466,11 +466,11 @@ async def test_audit_log_comercial_own_allowed(client: AsyncClient):
     )
     interaction_id = create_r.json()["data"]["id"]
 
-    # Update it to create audit entry
+    # Update it as comercial (the owner) to create audit entry
     await client.put(
         f"/api/v1/interactions/{interaction_id}",
-        json={"subject": "Actualizada", "status": "in_progress"},
-        headers=INTERNAL_HEADERS_ADMIN,
+        json={"subject": "Actualizada por comercial", "status": "in_progress"},
+        headers=INTERNAL_HEADERS_COMERCIAL,
     )
 
     # Comercial views own audit → 200
@@ -481,3 +481,37 @@ async def test_audit_log_comercial_own_allowed(client: AsyncClient):
     assert response.status_code == 200
     data = response.json()["data"]
     assert isinstance(data, list)
+    # Should have audit entries (subject and status changed)
+    assert len(data) >= 2
+
+
+@pytest.mark.asyncio
+async def test_audit_log_records_changes_from_comercial_update(client: AsyncClient):
+    """Verify audit entries are created when comercial updates their own interaction."""
+    # Create as comercial
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Original"),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    interaction_id = create_r.json()["data"]["id"]
+
+    # Update as comercial
+    await client.put(
+        f"/api/v1/interactions/{interaction_id}",
+        json={"subject": "Modificado por comercial", "status": "in_progress"},
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+
+    # Verify audit has entries from comercial
+    audit_r = await client.get(
+        f"/api/v1/interactions/{interaction_id}/audit",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    entries = audit_r.json()["data"]
+    # Should have entries for subject and status changes
+    assert len(entries) >= 2
+    # Check that edited_by matches comercial's user_id
+    comercial_user_id = INTERNAL_HEADERS_COMERCIAL["X-User-Id"]
+    for entry in entries:
+        assert entry["edited_by"] == comercial_user_id
