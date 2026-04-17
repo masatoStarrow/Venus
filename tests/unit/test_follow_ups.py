@@ -32,6 +32,7 @@ def _make_interaction(**kwargs) -> Interaction:
 
 # ── ListPendingFollowUps ────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_pending_follow_ups_returns_future():
     agent_id = uuid.uuid4()
@@ -47,9 +48,7 @@ async def test_pending_follow_ups_returns_future():
 
     assert total == 1
     assert len(items) == 1
-    repo.get_pending_follow_ups.assert_called_once_with(
-        agent_id, page=1, page_size=20
-    )
+    repo.get_pending_follow_ups.assert_called_once_with(agent_id, page=1, page_size=20)
 
 
 @pytest.mark.asyncio
@@ -61,9 +60,7 @@ async def test_pending_follow_ups_pagination():
     use_case = ListPendingFollowUps(interaction_repository=repo)
     await use_case.execute(agent_id, page=2, page_size=5)
 
-    repo.get_pending_follow_ups.assert_called_once_with(
-        agent_id, page=2, page_size=5
-    )
+    repo.get_pending_follow_ups.assert_called_once_with(agent_id, page=2, page_size=5)
 
 
 @pytest.mark.asyncio
@@ -81,6 +78,7 @@ async def test_pending_follow_ups_empty():
 
 # ── ListOverdueFollowUps ─────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_overdue_follow_ups_returns_past():
     past = datetime.now(timezone.utc) - timedelta(days=3)
@@ -92,10 +90,12 @@ async def test_overdue_follow_ups_returns_past():
     repo.get_overdue_follow_ups.return_value = (interactions, 2)
 
     use_case = ListOverdueFollowUps(interaction_repository=repo)
-    items, total = await use_case.execute()
+    items, total = await use_case.execute(agent_id=None)  # Admin sees all
 
     assert total == 2
-    repo.get_overdue_follow_ups.assert_called_once_with(page=1, page_size=20)
+    repo.get_overdue_follow_ups.assert_called_once_with(
+        agent_id=None, page=1, page_size=20
+    )
 
 
 @pytest.mark.asyncio
@@ -104,6 +104,8 @@ async def test_overdue_follow_ups_pagination():
     repo.get_overdue_follow_ups.return_value = ([], 0)
 
     use_case = ListOverdueFollowUps(interaction_repository=repo)
-    await use_case.execute(page=3, page_size=10)
+    await use_case.execute(agent_id=None, page=3, page_size=10)
 
-    repo.get_overdue_follow_ups.assert_called_once_with(page=3, page_size=10)
+    repo.get_overdue_follow_ups.assert_called_once_with(
+        agent_id=None, page=3, page_size=10
+    )
