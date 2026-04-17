@@ -74,7 +74,9 @@ class InteractionPgRepository(InteractionRepository):
             stmt = stmt.where(InteractionModel.interaction_date <= date_to)
         return stmt
 
-    def _apply_ordering(self, stmt, order_by: str = "interaction_date", order_dir: str = "desc"):
+    def _apply_ordering(
+        self, stmt, order_by: str = "interaction_date", order_dir: str = "desc"
+    ):
         column_map = {
             "interaction_date": InteractionModel.interaction_date,
             "created_at": InteractionModel.created_at,
@@ -228,7 +230,9 @@ class InteractionPgRepository(InteractionRepository):
 
     # ── Aggregations ─────────────────────────────────────────────────────
 
-    async def get_client_summary(self, client_id: UUID, *, agent_id: UUID | None = None) -> dict:
+    async def get_client_summary(
+        self, client_id: UUID, *, agent_id: UUID | None = None
+    ) -> dict:
         now = datetime.now(timezone.utc)
         thirty_days_ago = now - timedelta(days=30)
 
@@ -245,16 +249,34 @@ class InteractionPgRepository(InteractionRepository):
                 case((InteractionModel.interaction_date >= thirty_days_ago, 1), else_=0)
             ).label("interactions_last_30_days"),
             # by type
-            func.sum(case((InteractionModel.type == "call", 1), else_=0)).label("type_call"),
-            func.sum(case((InteractionModel.type == "email", 1), else_=0)).label("type_email"),
-            func.sum(case((InteractionModel.type == "meeting", 1), else_=0)).label("type_meeting"),
-            func.sum(case((InteractionModel.type == "ticket", 1), else_=0)).label("type_ticket"),
-            func.sum(case((InteractionModel.type == "note", 1), else_=0)).label("type_note"),
+            func.sum(case((InteractionModel.type == "call", 1), else_=0)).label(
+                "type_call"
+            ),
+            func.sum(case((InteractionModel.type == "email", 1), else_=0)).label(
+                "type_email"
+            ),
+            func.sum(case((InteractionModel.type == "meeting", 1), else_=0)).label(
+                "type_meeting"
+            ),
+            func.sum(case((InteractionModel.type == "ticket", 1), else_=0)).label(
+                "type_ticket"
+            ),
+            func.sum(case((InteractionModel.type == "note", 1), else_=0)).label(
+                "type_note"
+            ),
             # by status
-            func.sum(case((InteractionModel.status == "pending", 1), else_=0)).label("status_pending"),
-            func.sum(case((InteractionModel.status == "in_progress", 1), else_=0)).label("status_in_progress"),
-            func.sum(case((InteractionModel.status == "resolved", 1), else_=0)).label("status_resolved"),
-            func.sum(case((InteractionModel.status == "closed", 1), else_=0)).label("status_closed"),
+            func.sum(case((InteractionModel.status == "pending", 1), else_=0)).label(
+                "status_pending"
+            ),
+            func.sum(
+                case((InteractionModel.status == "in_progress", 1), else_=0)
+            ).label("status_in_progress"),
+            func.sum(case((InteractionModel.status == "resolved", 1), else_=0)).label(
+                "status_resolved"
+            ),
+            func.sum(case((InteractionModel.status == "closed", 1), else_=0)).label(
+                "status_closed"
+            ),
             # dates
             func.max(InteractionModel.interaction_date).label("last_interaction_date"),
             func.min(
@@ -289,7 +311,9 @@ class InteractionPgRepository(InteractionRepository):
 
         total = row.total_interactions or 0
         resolved_closed = (row.status_resolved or 0) + (row.status_closed or 0)
-        completion_rate = round(resolved_closed * 100.0 / total, 2) if total > 0 else 0.0
+        completion_rate = (
+            round(resolved_closed * 100.0 / total, 2) if total > 0 else 0.0
+        )
 
         return {
             "client_id": str(client_id),
@@ -337,7 +361,9 @@ class InteractionPgRepository(InteractionRepository):
             select(
                 InteractionModel.client_id,
                 func.count().label("interaction_count"),
-                func.max(InteractionModel.interaction_date).label("last_interaction_date"),
+                func.max(InteractionModel.interaction_date).label(
+                    "last_interaction_date"
+                ),
             )
             .where(base_where)
             .group_by(InteractionModel.client_id)
@@ -366,14 +392,11 @@ class InteractionPgRepository(InteractionRepository):
         self, agent_id: UUID, *, page: int = 1, page_size: int = 20
     ) -> tuple[list[Interaction], int]:
         now = datetime.now(timezone.utc)
-        base = (
-            select(InteractionModel)
-            .where(
-                InteractionModel.is_deleted == False,  # noqa: E712
-                InteractionModel.agent_id == agent_id,
-                InteractionModel.follow_up_date > now,
-                InteractionModel.status.not_in(["closed"]),
-            )
+        base = select(InteractionModel).where(
+            InteractionModel.is_deleted == False,  # noqa: E712
+            InteractionModel.agent_id == agent_id,
+            InteractionModel.follow_up_date > now,
+            InteractionModel.status.not_in(["closed"]),
         )
 
         count_stmt = select(func.count()).select_from(base.subquery())
@@ -389,18 +412,18 @@ class InteractionPgRepository(InteractionRepository):
         return [self._to_entity(m) for m in models], total
 
     async def get_overdue_follow_ups(
-        self, *, page: int = 1, page_size: int = 20
+        self, agent_id: UUID | None = None, *, page: int = 1, page_size: int = 20
     ) -> tuple[list[Interaction], int]:
         now = datetime.now(timezone.utc)
-        base = (
-            select(InteractionModel)
-            .where(
-                InteractionModel.is_deleted == False,  # noqa: E712
-                InteractionModel.follow_up_date != None,  # noqa: E711
-                InteractionModel.follow_up_date < now,
-                InteractionModel.status.not_in(["closed"]),
-            )
+        base = select(InteractionModel).where(
+            InteractionModel.is_deleted == False,  # noqa: E712
+            InteractionModel.follow_up_date != None,  # noqa: E711
+            InteractionModel.follow_up_date < now,
+            InteractionModel.status.not_in(["closed"]),
         )
+        # Filtrar por agent_id si se proporciona (para comercial)
+        if agent_id is not None:
+            base = base.where(InteractionModel.agent_id == agent_id)
 
         count_stmt = select(func.count()).select_from(base.subquery())
         total_result = await self._session.execute(count_stmt)

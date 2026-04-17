@@ -68,6 +68,39 @@ def _interaction_json(entity) -> dict:
     return InteractionResponse.model_validate(entity.__dict__).model_dump(mode="json")
 
 
+async def _verify_comercial_owns_interaction(
+    interaction_id: UUID,
+    context: UserContext,
+    db: AsyncSession,
+) -> JSONResponse | None:
+    """
+    Verify that a comercial user owns the interaction.
+    Returns a 403 JSONResponse if not owned, or None if access is allowed.
+    Non-comercial roles always pass (returns None).
+    """
+    if context.role != UserRole.COMERCIAL:
+        return None
+
+    get_uc = get_get_interaction_use_case(db)
+    try:
+        interaction = await get_uc.execute(interaction_id)
+    except InteractionNotFoundError:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=error_response("NOT_FOUND", "Interacción no encontrada"),
+        )
+
+    if interaction.agent_id != context.user_id:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content=error_response(
+                "FORBIDDEN", "Comercial solo puede acceder a sus propias interacciones"
+            ),
+        )
+
+    return None
+
+
 # ── GET /metrics ──────────────────────────────────────────────────────────
 
 
@@ -126,8 +159,13 @@ async def list_overdue_follow_ups(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
+    # Comercial solo ve sus propios seguimientos vencidos
+    agent_id = context.user_id if context.role == UserRole.COMERCIAL else None
+
     use_case = get_list_overdue_follow_ups_use_case(db)
-    items, total = await use_case.execute(page=page, page_size=page_size)
+    items, total = await use_case.execute(
+        agent_id=agent_id, page=page, page_size=page_size
+    )
     data = [_interaction_json(i) for i in items]
     return paginated_response(items=data, total=total, page=page, page_size=page_size)
 
@@ -303,14 +341,9 @@ async def get_interaction(
             content=error_response(e.code, e.message),
         )
 
-    # Verificar ownership para comercial
-    if context.role == UserRole.COMERCIAL and interaction.agent_id != context.user_id:
-        return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content=error_response(
-                "FORBIDDEN", "Comercial solo puede ver sus propias interacciones"
-            ),
-        )
+    forbidden = await _verify_comercial_owns_interaction(interaction_id, context, db)
+    if forbidden:
+        return forbidden
 
     data = _interaction_json(interaction)
     return success_response(data)
@@ -331,24 +364,9 @@ async def update_interaction(
     context: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verificar ownership para comercial
-    if context.role == UserRole.COMERCIAL:
-        get_uc = get_get_interaction_use_case(db)
-        try:
-            interaction = await get_uc.execute(interaction_id)
-            if interaction.agent_id != context.user_id:
-                return JSONResponse(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    content=error_response(
-                        "FORBIDDEN",
-                        "Comercial solo puede editar sus propias interacciones",
-                    ),
-                )
-        except InteractionNotFoundError:
-            return JSONResponse(
-                status_code=status.HTTP_404_NOT_FOUND,
-                content=error_response("NOT_FOUND", "Interacción no encontrada"),
-            )
+    forbidden = await _verify_comercial_owns_interaction(interaction_id, context, db)
+    if forbidden:
+        return forbidden
 
     dto = UpdateInteractionDTO(
         type=body.type.value if body.type else None,
@@ -431,24 +449,9 @@ async def close_interaction(
     context: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verificar ownership para comercial
-    if context.role == UserRole.COMERCIAL:
-        get_uc = get_get_interaction_use_case(db)
-        try:
-            interaction = await get_uc.execute(interaction_id)
-            if interaction.agent_id != context.user_id:
-                return JSONResponse(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    content=error_response(
-                        "FORBIDDEN",
-                        "Comercial solo puede cerrar sus propias interacciones",
-                    ),
-                )
-        except InteractionNotFoundError:
-            return JSONResponse(
-                status_code=status.HTTP_404_NOT_FOUND,
-                content=error_response("NOT_FOUND", "Interacción no encontrada"),
-            )
+    forbidden = await _verify_comercial_owns_interaction(interaction_id, context, db)
+    if forbidden:
+        return forbidden
 
     dto = CloseInteractionDTO(outcome=body.outcome if body else None)
     use_case = get_close_interaction_use_case(db)
@@ -486,14 +489,26 @@ async def get_audit_log(
     context: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verify interaction exists
+    # Verificar que la interacción existe
     get_uc = get_get_interaction_use_case(db)
     try:
-        await get_uc.execute(interaction_id)
-    except InteractionNotFoundError as e:
+        interaction = await get_uc.execute(interaction_id)
+    except InteractionNotFoundError:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
-            content=error_response(e.code, e.message),
+            content=error_response(
+                "INTERACTION_NOT_FOUND", "Interacción no encontrada"
+            ),
+        )
+
+    # Verificar ownership para comercial
+    if context.role == UserRole.COMERCIAL and interaction.agent_id != context.user_id:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content=error_response(
+                "FORBIDDEN",
+                "Comercial solo puede ver auditoría de sus propias interacciones",
+            ),
         )
 
     audit_uc = get_get_audit_log_use_case(db)

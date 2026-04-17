@@ -29,8 +29,8 @@ class ListOverdueFollowUps:
         self._repo = interaction_repository
 
     async def execute(
-        self, *, page: int = 1, page_size: int = 20
+        self, agent_id: UUID | None = None, *, page: int = 1, page_size: int = 20
     ) -> tuple[list[Interaction], int]:
         return await self._repo.get_overdue_follow_ups(
-            page=page, page_size=page_size
+            agent_id=agent_id, page=page, page_size=page_size
         )
