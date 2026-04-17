@@ -56,6 +56,7 @@ router = APIRouter(prefix="/api/v1/interactions", tags=["Interactions"])
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
+
 def _split_csv(value: str | None) -> list[str] | None:
     """Split a comma-separated query parameter into a list."""
     if not value:
@@ -68,6 +69,7 @@ def _interaction_json(entity) -> dict:
 
 
 # ── GET /metrics ──────────────────────────────────────────────────────────
+
 
 @router.get(
     "/metrics",
@@ -90,6 +92,7 @@ async def get_metrics(
 
 # ── GET /follow-ups/pending ───────────────────────────────────────────────
 
+
 @router.get(
     "/follow-ups/pending",
     summary="Seguimientos pendientes del agente",
@@ -111,6 +114,7 @@ async def list_pending_follow_ups(
 
 # ── GET /follow-ups/overdue ──────────────────────────────────────────────
 
+
 @router.get(
     "/follow-ups/overdue",
     summary="Seguimientos vencidos",
@@ -130,6 +134,7 @@ async def list_overdue_follow_ups(
 
 # ── GET /client/{client_id} ──────────────────────────────────────────────
 
+
 @router.get(
     "/client/{client_id}",
     summary="Historial de interacciones de un cliente",
@@ -139,7 +144,9 @@ async def list_by_client(
     client_id: UUID,
     context: UserContext = Depends(get_current_user_context),
     type: str | None = Query(None, description="Filtrar por tipo (csv)"),
-    client_status: str | None = Query(None, alias="status", description="Filtrar por estado (csv)"),
+    client_status: str | None = Query(
+        None, alias="status", description="Filtrar por estado (csv)"
+    ),
     agent_id: str | None = Query(None, description="Filtrar por agente (csv UUIDs)"),
     date_from: datetime | None = Query(None, description="Fecha inicio (ISO 8601)"),
     date_to: datetime | None = Query(None, description="Fecha fin (ISO 8601)"),
@@ -170,6 +177,7 @@ async def list_by_client(
 
 # ── GET /client/{client_id}/summary ───────────────────────────────────────
 
+
 @router.get(
     "/client/{client_id}/summary",
     summary="Resumen de interacciones de un cliente",
@@ -192,6 +200,7 @@ async def get_client_summary(
 
 # ── GET / ─────────────────────────────────────────────────────────────────
 
+
 @router.get(
     "/",
     summary="Listar interacciones",
@@ -204,7 +213,9 @@ async def list_interactions(
     context: UserContext = Depends(get_current_user_context),
     type: str | None = Query(None, description="Tipo(s) separados por coma"),
     channel: str | None = Query(None, description="Canal(es) separados por coma"),
-    client_status: str | None = Query(None, alias="status", description="Estado(s) separados por coma"),
+    client_status: str | None = Query(
+        None, alias="status", description="Estado(s) separados por coma"
+    ),
     client_id: UUID | None = Query(None, description="Filtrar por ID de cliente"),
     date_from: datetime | None = Query(None, description="Fecha inicio (ISO 8601)"),
     date_to: datetime | None = Query(None, description="Fecha fin (ISO 8601)"),
@@ -235,11 +246,12 @@ async def list_interactions(
 
 # ── POST / ────────────────────────────────────────────────────────────────
 
+
 @router.post(
     "/",
     status_code=status.HTTP_201_CREATED,
     summary="Crear interacción",
-    description="Registra una nueva interacción. Solo admin y soporte.",
+    description="Registra una nueva interacción. Todos los roles pueden crear.",
     responses={403: {"description": "Forbidden"}},
 )
 async def create_interaction(
@@ -247,12 +259,6 @@ async def create_interaction(
     context: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
-    if context.role == UserRole.COMERCIAL:
-        return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content=error_response("FORBIDDEN", "Comercial no puede crear interacciones"),
-        )
-
     dto = CreateInteractionDTO(
         client_id=body.client_id,
         type=body.type.value,
@@ -276,6 +282,7 @@ async def create_interaction(
 
 
 # ── GET /{interaction_id} ────────────────────────────────────────────────
+
 
 @router.get(
     "/{interaction_id}",
@@ -302,10 +309,11 @@ async def get_interaction(
 
 # ── PUT /{interaction_id} ────────────────────────────────────────────────
 
+
 @router.put(
     "/{interaction_id}",
     summary="Actualizar interacción",
-    description="Actualiza campos de una interacción. Solo admin y soporte.",
+    description="Actualiza campos de una interacción. Admin/Soporte: todas. Comercial: solo sus propias.",
     responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}},
 )
 async def update_interaction(
@@ -314,11 +322,24 @@ async def update_interaction(
     context: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
+    # Verificar ownership para comercial
     if context.role == UserRole.COMERCIAL:
-        return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content=error_response("FORBIDDEN", "Comercial no puede editar interacciones"),
-        )
+        get_uc = get_get_interaction_use_case(db)
+        try:
+            interaction = await get_uc.execute(interaction_id)
+            if interaction.agent_id != context.user_id:
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content=error_response(
+                        "FORBIDDEN",
+                        "Comercial solo puede editar sus propias interacciones",
+                    ),
+                )
+        except InteractionNotFoundError:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=error_response("NOT_FOUND", "Interacción no encontrada"),
+            )
 
     dto = UpdateInteractionDTO(
         type=body.type.value if body.type else None,
@@ -334,7 +355,9 @@ async def update_interaction(
     use_case = get_update_interaction_use_case(db)
 
     try:
-        interaction = await use_case.execute(interaction_id, dto, editor_id=context.user_id)
+        interaction = await use_case.execute(
+            interaction_id, dto, editor_id=context.user_id
+        )
     except InteractionNotFoundError as e:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -346,6 +369,7 @@ async def update_interaction(
 
 
 # ── DELETE /{interaction_id} ──────────────────────────────────────────────
+
 
 @router.delete(
     "/{interaction_id}",
@@ -361,7 +385,9 @@ async def delete_interaction(
     if context.role != UserRole.ADMIN:
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            content=error_response("FORBIDDEN", "Solo admin puede eliminar interacciones"),
+            content=error_response(
+                "FORBIDDEN", "Solo admin puede eliminar interacciones"
+            ),
         )
 
     use_case = get_soft_delete_interaction_use_case(db)
@@ -379,10 +405,11 @@ async def delete_interaction(
 
 # ── PATCH /{interaction_id}/close ─────────────────────────────────────────
 
+
 @router.patch(
     "/{interaction_id}/close",
     summary="Cerrar interacción",
-    description="Cambia status a 'closed'. No se puede cerrar si ya está cerrada.",
+    description="Cambia status a 'closed'. Admin/Soporte: todas. Comercial: solo sus propias.",
     responses={
         403: {"description": "Forbidden"},
         404: {"description": "Not found"},
@@ -395,17 +422,32 @@ async def close_interaction(
     context: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
+    # Verificar ownership para comercial
     if context.role == UserRole.COMERCIAL:
-        return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content=error_response("FORBIDDEN", "Comercial no puede cerrar interacciones"),
-        )
+        get_uc = get_get_interaction_use_case(db)
+        try:
+            interaction = await get_uc.execute(interaction_id)
+            if interaction.agent_id != context.user_id:
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content=error_response(
+                        "FORBIDDEN",
+                        "Comercial solo puede cerrar sus propias interacciones",
+                    ),
+                )
+        except InteractionNotFoundError:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=error_response("NOT_FOUND", "Interacción no encontrada"),
+            )
 
     dto = CloseInteractionDTO(outcome=body.outcome if body else None)
     use_case = get_close_interaction_use_case(db)
 
     try:
-        interaction = await use_case.execute(interaction_id, dto, editor_id=context.user_id)
+        interaction = await use_case.execute(
+            interaction_id, dto, editor_id=context.user_id
+        )
     except InteractionNotFoundError as e:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -422,6 +464,7 @@ async def close_interaction(
 
 
 # ── GET /{interaction_id}/audit ───────────────────────────────────────────
+
 
 @router.get(
     "/{interaction_id}/audit",
