@@ -303,6 +303,15 @@ async def get_interaction(
             content=error_response(e.code, e.message),
         )
 
+    # Verificar ownership para comercial
+    if context.role == UserRole.COMERCIAL and interaction.agent_id != context.user_id:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content=error_response(
+                "FORBIDDEN", "Comercial solo puede ver sus propias interacciones"
+            ),
+        )
+
     data = _interaction_json(interaction)
     return success_response(data)
 

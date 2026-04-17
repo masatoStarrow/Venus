@@ -193,6 +193,45 @@ async def test_get_interaction_not_found_404(client: AsyncClient):
     assert response.json()["error"]["code"] == "INTERACTION_NOT_FOUND"
 
 
+@pytest.mark.asyncio
+async def test_get_interaction_by_id_comercial_forbidden_if_not_own(
+    client: AsyncClient,
+):
+    """Comercial cannot view an interaction created by another user."""
+    # Create as admin
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Interacción de admin"),
+        headers=INTERNAL_HEADERS_ADMIN,
+    )
+    interaction_id = create_r.json()["data"]["id"]
+
+    # Comercial tries to view it → 403
+    response = await client.get(
+        f"/api/v1/interactions/{interaction_id}", headers=INTERNAL_HEADERS_COMERCIAL
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_interaction_by_id_comercial_own_allowed(client: AsyncClient):
+    """Comercial can view their own interaction by ID."""
+    # Create as comercial
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Mi interacción"),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    interaction_id = create_r.json()["data"]["id"]
+
+    # Comercial views own → 200
+    response = await client.get(
+        f"/api/v1/interactions/{interaction_id}", headers=INTERNAL_HEADERS_COMERCIAL
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["id"] == interaction_id
+
+
 # ── PUT /api/v1/interactions/{id} ─────────────────────────────────────────
 
 
