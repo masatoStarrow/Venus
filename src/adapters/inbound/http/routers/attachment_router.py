@@ -20,18 +20,52 @@ from src.domain.exceptions import (
     FileTooLargeError,
     InvalidFileTypeError,
 )
+from src.domain.value_objects.user_role import UserRole
 from src.infrastructure.database.connection import get_db
 from src.infrastructure.di.container import (
     get_upload_attachment_use_case,
     get_list_attachments_use_case,
     get_download_attachment_use_case,
     get_delete_attachment_use_case,
+    get_get_interaction_use_case,
 )
 
 router = APIRouter(
     prefix="/api/v1/interactions/{interaction_id}/attachments",
     tags=["Attachments"],
 )
+
+
+# ── Helper ───────────────────────────────────────────────────────────────
+
+
+async def _verify_comercial_owns_interaction(
+    interaction_id: UUID,
+    user: UserContext,
+    db: AsyncSession,
+) -> JSONResponse | None:
+    """Verify that a comercial user owns the interaction. Returns 403 if not owned."""
+    if user.role != UserRole.COMERCIAL:
+        return None
+
+    get_uc = get_get_interaction_use_case(db)
+    try:
+        interaction = await get_uc.execute(interaction_id)
+    except InteractionNotFoundError:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=error_response("NOT_FOUND", "Interacción no encontrada"),
+        )
+
+    if interaction.agent_id != user.user_id:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content=error_response(
+                "FORBIDDEN", "Comercial solo puede acceder a sus propias interacciones"
+            ),
+        )
+
+    return None
 
 
 @router.post(
@@ -43,10 +77,17 @@ router = APIRouter(
 async def upload_attachment(
     interaction_id: UUID,
     file: UploadFile = File(...),
-    context_field: str = Query("internal_note", alias="context", description="Contexto: internal_note | note"),
+    context_field: str = Query(
+        "internal_note", alias="context", description="Contexto: internal_note | note"
+    ),
     user: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
+    # Verificar ownership para comercial
+    forbidden = await _verify_comercial_owns_interaction(interaction_id, user, db)
+    if forbidden:
+        return forbidden
+
     use_case = get_upload_attachment_use_case(db)
     file_data = await file.read()
 
@@ -75,7 +116,9 @@ async def upload_attachment(
             content=error_response(e.code, e.message),
         )
 
-    data = AttachmentResponse.model_validate(attachment.__dict__).model_dump(mode="json")
+    data = AttachmentResponse.model_validate(attachment.__dict__).model_dump(
+        mode="json"
+    )
     return JSONResponse(
         status_code=status.HTTP_201_CREATED,
         content=success_response(data, "Adjunto subido exitosamente"),
@@ -91,6 +134,11 @@ async def list_attachments(
     user: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
+    # Verificar ownership para comercial
+    forbidden = await _verify_comercial_owns_interaction(interaction_id, user, db)
+    if forbidden:
+        return forbidden
+
     use_case = get_list_attachments_use_case(db)
     try:
         items = await use_case.execute(interaction_id)
@@ -114,10 +162,17 @@ async def list_attachments(
 async def download_attachment(
     interaction_id: UUID,
     attachment_id: UUID,
-    expires_in: int = Query(3600, ge=60, le=86400, description="Segundos de validez del enlace"),
+    expires_in: int = Query(
+        3600, ge=60, le=86400, description="Segundos de validez del enlace"
+    ),
     user: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
+    # Verificar ownership para comercial
+    forbidden = await _verify_comercial_owns_interaction(interaction_id, user, db)
+    if forbidden:
+        return forbidden
+
     use_case = get_download_attachment_use_case(db)
     try:
         url = await use_case.execute(interaction_id, attachment_id, expires_in)
@@ -154,6 +209,11 @@ async def delete_attachment(
     user: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
+    # Verificar ownership para comercial (defense-in-depth)
+    forbidden = await _verify_comercial_owns_interaction(interaction_id, user, db)
+    if forbidden:
+        return forbidden
+
     use_case = get_delete_attachment_use_case(db)
     try:
         await use_case.execute(interaction_id, attachment_id)

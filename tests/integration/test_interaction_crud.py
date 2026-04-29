@@ -12,11 +12,13 @@ from tests.conftest import (
     INTERNAL_HEADERS_SOPORTE,
     INTERNAL_HEADERS_COMERCIAL,
     CLIENT_A_ID,
+    COMERCIAL_ID,
     _interaction_payload,
 )
 
 
 # ── POST /api/v1/interactions/ ────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_create_interaction_success(client: AsyncClient):
@@ -38,13 +40,15 @@ async def test_create_interaction_success(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_create_interaction_comercial_forbidden(client: AsyncClient):
-    payload = _interaction_payload()
+async def test_create_interaction_comercial_allowed(client: AsyncClient):
+    """Comercial can create interactions (assigned to themselves)."""
+    payload = _interaction_payload(subject="Comercial crea su propia interacción")
     response = await client.post(
         "/api/v1/interactions/", json=payload, headers=INTERNAL_HEADERS_COMERCIAL
     )
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "FORBIDDEN"
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert data["agent_id"] == str(COMERCIAL_ID)  # Assigned to creator
 
 
 @pytest.mark.asyncio
@@ -99,11 +103,10 @@ async def test_create_interaction_with_all_fields(client: AsyncClient):
 
 # ── GET /api/v1/interactions/ ─────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_list_interactions_empty(client: AsyncClient):
-    response = await client.get(
-        "/api/v1/interactions/", headers=INTERNAL_HEADERS_ADMIN
-    )
+    response = await client.get("/api/v1/interactions/", headers=INTERNAL_HEADERS_ADMIN)
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["items"] == []
@@ -117,9 +120,7 @@ async def test_list_interactions_returns_created(client: AsyncClient):
         json=_interaction_payload(),
         headers=INTERNAL_HEADERS_ADMIN,
     )
-    response = await client.get(
-        "/api/v1/interactions/", headers=INTERNAL_HEADERS_ADMIN
-    )
+    response = await client.get("/api/v1/interactions/", headers=INTERNAL_HEADERS_ADMIN)
     assert response.status_code == 200
     assert len(response.json()["data"]["items"]) == 1
 
@@ -165,6 +166,7 @@ async def test_list_interactions_pagination(client: AsyncClient):
 
 # ── GET /api/v1/interactions/{id} ─────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_interaction_by_id(client: AsyncClient):
     create_r = await client.post(
@@ -191,7 +193,47 @@ async def test_get_interaction_not_found_404(client: AsyncClient):
     assert response.json()["error"]["code"] == "INTERACTION_NOT_FOUND"
 
 
+@pytest.mark.asyncio
+async def test_get_interaction_by_id_comercial_forbidden_if_not_own(
+    client: AsyncClient,
+):
+    """Comercial cannot view an interaction created by another user."""
+    # Create as admin
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Interacción de admin"),
+        headers=INTERNAL_HEADERS_ADMIN,
+    )
+    interaction_id = create_r.json()["data"]["id"]
+
+    # Comercial tries to view it → 403
+    response = await client.get(
+        f"/api/v1/interactions/{interaction_id}", headers=INTERNAL_HEADERS_COMERCIAL
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_interaction_by_id_comercial_own_allowed(client: AsyncClient):
+    """Comercial can view their own interaction by ID."""
+    # Create as comercial
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Mi interacción"),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    interaction_id = create_r.json()["data"]["id"]
+
+    # Comercial views own → 200
+    response = await client.get(
+        f"/api/v1/interactions/{interaction_id}", headers=INTERNAL_HEADERS_COMERCIAL
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["id"] == interaction_id
+
+
 # ── PUT /api/v1/interactions/{id} ─────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_update_interaction_success(client: AsyncClient):
@@ -240,7 +282,31 @@ async def test_update_interaction_not_found_404(client: AsyncClient):
     assert response.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_update_interaction_comercial_own_allowed(client: AsyncClient):
+    """Comercial can update their own interactions."""
+    # Create as comercial
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Mi interacción"),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    interaction_id = create_r.json()["data"]["id"]
+
+    # Update as comercial (should succeed)
+    response = await client.put(
+        f"/api/v1/interactions/{interaction_id}",
+        json={"subject": "Actualizado por mí", "status": "in_progress"},
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["subject"] == "Actualizado por mí"
+    assert data["status"] == "in_progress"
+
+
 # ── DELETE /api/v1/interactions/{id} ──────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_delete_interaction_admin_only(client: AsyncClient):
@@ -285,6 +351,7 @@ async def test_deleted_interaction_not_visible(client: AsyncClient):
 
 
 # ── PATCH /api/v1/interactions/{id}/close ──────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_close_interaction_success(client: AsyncClient):
@@ -341,3 +408,110 @@ async def test_close_interaction_comercial_forbidden(client: AsyncClient):
         headers=INTERNAL_HEADERS_COMERCIAL,
     )
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_close_interaction_comercial_own_allowed(client: AsyncClient):
+    """Comercial can close their own interactions."""
+    # Create as comercial
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Mi interacción a cerrar"),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    interaction_id = create_r.json()["data"]["id"]
+
+    # Close as comercial (should succeed)
+    response = await client.patch(
+        f"/api/v1/interactions/{interaction_id}/close",
+        json={"outcome": "Cerrado por el comercial"},
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "closed"
+    assert data["outcome"] == "Cerrado por el comercial"
+
+
+# ── GET /{interaction_id}/audit ───────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_audit_log_comercial_forbidden_if_not_own(client: AsyncClient):
+    """Comercial cannot view audit of other user's interactions."""
+    # Create as admin
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Interacción de admin"),
+        headers=INTERNAL_HEADERS_ADMIN,
+    )
+    interaction_id = create_r.json()["data"]["id"]
+
+    # Comercial tries to get audit → 403
+    response = await client.get(
+        f"/api/v1/interactions/{interaction_id}/audit",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_audit_log_comercial_own_allowed(client: AsyncClient):
+    """Comercial can view audit of their own interactions."""
+    # Create as comercial
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Mi interacción"),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    interaction_id = create_r.json()["data"]["id"]
+
+    # Update it as comercial (the owner) to create audit entry
+    await client.put(
+        f"/api/v1/interactions/{interaction_id}",
+        json={"subject": "Actualizada por comercial", "status": "in_progress"},
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+
+    # Comercial views own audit → 200
+    response = await client.get(
+        f"/api/v1/interactions/{interaction_id}/audit",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert isinstance(data, list)
+    # Should have audit entries (subject and status changed)
+    assert len(data) >= 2
+
+
+@pytest.mark.asyncio
+async def test_audit_log_records_changes_from_comercial_update(client: AsyncClient):
+    """Verify audit entries are created when comercial updates their own interaction."""
+    # Create as comercial
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Original"),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    interaction_id = create_r.json()["data"]["id"]
+
+    # Update as comercial
+    await client.put(
+        f"/api/v1/interactions/{interaction_id}",
+        json={"subject": "Modificado por comercial", "status": "in_progress"},
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+
+    # Verify audit has entries from comercial
+    audit_r = await client.get(
+        f"/api/v1/interactions/{interaction_id}/audit",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    entries = audit_r.json()["data"]
+    # Should have entries for subject and status changes
+    assert len(entries) >= 2
+    # Check that edited_by matches comercial's user_id
+    comercial_user_id = INTERNAL_HEADERS_COMERCIAL["X-User-Id"]
+    for entry in entries:
+        assert entry["edited_by"] == comercial_user_id

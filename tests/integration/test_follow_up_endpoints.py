@@ -16,6 +16,7 @@ from tests.conftest import (
 
 # ── GET /api/v1/interactions/follow-ups/pending ───────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_pending_follow_ups_empty(client: AsyncClient):
     response = await client.get(
@@ -53,6 +54,7 @@ async def test_pending_follow_ups_returns_future(client: AsyncClient):
 
 
 # ── GET /api/v1/interactions/follow-ups/overdue ───────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_overdue_follow_ups_returns_past(client: AsyncClient):
@@ -100,7 +102,48 @@ async def test_overdue_does_not_include_closed(client: AsyncClient):
     assert response.json()["data"]["total"] == 0
 
 
+@pytest.mark.asyncio
+async def test_overdue_follow_ups_comercial_only_sees_own(client: AsyncClient):
+    """Comercial only sees their own overdue follow-ups."""
+    # Create overdue interaction as admin
+    await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(
+            subject="Follow-up de admin",
+            follow_up_date="2020-01-01T10:00:00Z",
+        ),
+        headers=INTERNAL_HEADERS_ADMIN,
+    )
+
+    # Create overdue interaction as comercial
+    await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(
+            subject="Follow-up de comercial",
+            follow_up_date="2020-01-01T10:00:00Z",
+        ),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+
+    # Admin sees both
+    response_admin = await client.get(
+        "/api/v1/interactions/follow-ups/overdue",
+        headers=INTERNAL_HEADERS_ADMIN,
+    )
+    assert response_admin.json()["data"]["total"] == 2
+
+    # Comercial sees only theirs
+    response_comercial = await client.get(
+        "/api/v1/interactions/follow-ups/overdue",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    data = response_comercial.json()["data"]
+    assert data["total"] == 1
+    assert data["items"][0]["subject"] == "Follow-up de comercial"
+
+
 # ── GET /api/v1/interactions/metrics ──────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_metrics_empty(client: AsyncClient):
@@ -125,13 +168,18 @@ async def test_metrics_with_data(client: AsyncClient):
     )
     await client.post(
         "/api/v1/interactions/",
-        json=_interaction_payload(client_id=str(CLIENT_A_ID), type="email", channel="email"),
+        json=_interaction_payload(
+            client_id=str(CLIENT_A_ID), type="email", channel="email"
+        ),
         headers=INTERNAL_HEADERS_ADMIN,
     )
     from tests.conftest import CLIENT_B_ID
+
     await client.post(
         "/api/v1/interactions/",
-        json=_interaction_payload(client_id=str(CLIENT_B_ID), type="meeting", channel="in_person"),
+        json=_interaction_payload(
+            client_id=str(CLIENT_B_ID), type="meeting", channel="in_person"
+        ),
         headers=INTERNAL_HEADERS_ADMIN,
     )
 
@@ -144,12 +192,15 @@ async def test_metrics_with_data(client: AsyncClient):
     assert data["avg_interactions_per_client"] == 1.5
     # per_client breakdown
     assert len(data["per_client"]) == 2
-    client_a_stat = next(c for c in data["per_client"] if c["client_id"] == str(CLIENT_A_ID))
+    client_a_stat = next(
+        c for c in data["per_client"] if c["client_id"] == str(CLIENT_A_ID)
+    )
     assert client_a_stat["interaction_count"] == 2
     assert client_a_stat["last_interaction_date"] is not None
 
 
 # ── GET /api/v1/interactions/{id}/audit ───────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_audit_log_after_update(client: AsyncClient):
@@ -198,6 +249,7 @@ async def test_audit_log_empty_when_no_updates(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_audit_log_not_found_404(client: AsyncClient):
     import uuid
+
     response = await client.get(
         f"/api/v1/interactions/{uuid.uuid4()}/audit",
         headers=INTERNAL_HEADERS_ADMIN,
@@ -206,6 +258,7 @@ async def test_audit_log_not_found_404(client: AsyncClient):
 
 
 # ── Health check ──────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_health_check(client: AsyncClient):

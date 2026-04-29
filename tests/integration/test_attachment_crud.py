@@ -11,7 +11,12 @@ import uuid
 
 import pytest
 
-from tests.conftest import ADMIN_ID, CLIENT_A_ID, INTERNAL_HEADERS_ADMIN
+from tests.conftest import (
+    ADMIN_ID,
+    CLIENT_A_ID,
+    INTERNAL_HEADERS_ADMIN,
+    INTERNAL_HEADERS_COMERCIAL,
+)
 
 
 BASE = "/api/v1/interactions"
@@ -31,7 +36,9 @@ async def _create_interaction(client) -> str:
     return resp.json()["data"]["id"]
 
 
-async def _upload_file(client, interaction_id: str, filename="test.pdf", content_type="application/pdf"):
+async def _upload_file(
+    client, interaction_id: str, filename="test.pdf", content_type="application/pdf"
+):
     """Upload a tiny file and return the response."""
     file_data = b"%PDF-1.4 fake content"
     return await client.post(
@@ -42,6 +49,7 @@ async def _upload_file(client, interaction_id: str, filename="test.pdf", content
 
 
 # ── Upload ───────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_upload_attachment(client):
@@ -78,6 +86,7 @@ async def test_upload_attachment_interaction_not_found(client):
 
 # ── List ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_list_attachments(client):
     iid = await _create_interaction(client)
@@ -103,6 +112,7 @@ async def test_list_attachments_empty(client):
 
 
 # ── Download ─────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_download_attachment(client):
@@ -134,6 +144,7 @@ async def test_download_attachment_not_found(client):
 
 # ── Delete ───────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_delete_attachment(client):
     iid = await _create_interaction(client)
@@ -163,3 +174,53 @@ async def test_delete_attachment_not_found(client):
         headers=INTERNAL_HEADERS_ADMIN,
     )
     assert resp.status_code == 404
+
+
+# ── Ownership tests for comercial ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_upload_attachment_comercial_forbidden_if_not_own(client):
+    """Comercial cannot upload to another user's interactions."""
+    # Create interaction as admin
+    iid = await _create_interaction(client)
+
+    # Comercial tries to upload → 403
+    file_data = b"%PDF-1.4 fake content"
+    resp = await client.post(
+        f"{BASE}/{iid}/attachments/?context=internal_note",
+        files={"file": ("test.pdf", io.BytesIO(file_data), "application/pdf")},
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_attachments_comercial_forbidden_if_not_own(client):
+    """Comercial cannot list attachments of another user's interactions."""
+    # Create interaction as admin
+    iid = await _create_interaction(client)
+    await _upload_file(client, iid)
+
+    # Comercial tries to list → 403
+    resp = await client.get(
+        f"{BASE}/{iid}/attachments/",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_download_attachment_comercial_forbidden_if_not_own(client):
+    """Comercial cannot download attachments from another user's interactions."""
+    # Create interaction as admin and upload file
+    iid = await _create_interaction(client)
+    upload_resp = await _upload_file(client, iid)
+    att_id = upload_resp.json()["data"]["id"]
+
+    # Comercial tries to download → 403
+    resp = await client.get(
+        f"{BASE}/{iid}/attachments/{att_id}/download",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert resp.status_code == 403
