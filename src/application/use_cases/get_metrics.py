@@ -12,5 +12,5 @@ class GetMetrics:
     def __init__(self, interaction_repository: InteractionRepository) -> None:
         self._repo = interaction_repository
 
-    async def execute(self, *, agent_id: UUID | None = None) -> dict:
-        return await self._repo.get_metrics(agent_id=agent_id)
+    async def execute(self, *, agent_id: UUID | None = None, client_ids: list[UUID] | None = None) -> dict:
+        return await self._repo.get_metrics(agent_id=agent_id, client_ids=client_ids)

@@ -443,12 +443,19 @@ async def list_by_client(
     use_case: ListByClient = Depends(get_list_by_client_use_case),
 ):
     if context.role == UserRole.COMERCIAL:
-        # Comercial solo ve el historial si el cliente le pertenece
-        return await use_case.execute(client_id=client_id, agent_id=context.user_id)
+        owned_client_ids = await _get_comercial_owned_client_ids(context, db)
+        if client_id not in owned_client_ids:
+            return empty_response()
+        return await use_case.execute(client_id=client_id)
     return await use_case.execute(client_id=client_id)
 ```
 
-> **Regla:** autorización → Gateway. Filtrado de datos → microservicio.
+> **Regla de visibilidad por rol:**
+> - **Admin/Soporte:** ven todo.
+> - **Comercial READ:** ve TODAS las interacciones de clientes donde tiene al menos una interacción propia ("clientes asignados"). Usa `get_owned_client_ids(agent_id)` para obtener la lista.
+> - **Comercial WRITE:** solo puede editar/cerrar/subir adjuntos a interacciones donde `agent_id == user_id`.
+> - **Follow-ups:** siempre propios (`agent_id == user_id`).
+> - **Regla general:** autorización → Gateway. Filtrado de datos → microservicio.
 ---
 
 ## Paso a paso de implementación

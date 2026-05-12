@@ -23,7 +23,12 @@ from src.application.use_cases.upload_attachment import UploadAttachment
 from src.application.use_cases.list_attachments import ListAttachments
 from src.application.use_cases.download_attachment import DownloadAttachment
 from src.application.use_cases.delete_attachment import DeleteAttachment
+from src.domain.ports.interaction_repository import InteractionRepository
 from src.domain.ports.file_storage import FileStorage
+
+
+def get_interaction_repository(db: AsyncSession) -> InteractionRepository:
+    return InteractionPgRepository(db)
 
 
 # ── Interaction use case factories ───────────────────────────────────────

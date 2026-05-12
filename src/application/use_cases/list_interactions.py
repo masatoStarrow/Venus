@@ -18,6 +18,7 @@ class ListInteractions:
         *,
         client_id: UUID | None = None,
         agent_id: UUID | None = None,
+        client_ids: list[UUID] | None = None,
         type_filter: list[str] | None = None,
         channel_filter: list[str] | None = None,
         status_filter: list[str] | None = None,
@@ -31,6 +32,7 @@ class ListInteractions:
         return await self._repo.list_interactions(
             client_id=client_id,
             agent_id=agent_id,
+            client_ids=client_ids,
             type_filter=type_filter,
             channel_filter=channel_filter,
             status_filter=status_filter,

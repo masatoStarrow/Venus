@@ -14,11 +14,16 @@ class InteractionRepository(ABC):
     async def get_by_id(self, interaction_id: UUID) -> Interaction | None: ...
 
     @abstractmethod
+    async def get_owned_client_ids(self, agent_id: UUID) -> list[UUID]:
+        ...
+    
+    @abstractmethod
     async def list_interactions(
         self,
         *,
         client_id: UUID | None = None,
         agent_id: UUID | None = None,
+        client_ids: list[UUID] | None = None,
         type_filter: list[str] | None = None,
         channel_filter: list[str] | None = None,
         status_filter: list[str] | None = None,
@@ -66,7 +71,7 @@ class InteractionRepository(ABC):
     ) -> dict: ...
 
     @abstractmethod
-    async def get_metrics(self, *, agent_id: UUID | None = None) -> dict: ...
+    async def get_metrics(self, *, agent_id: UUID | None = None, client_ids: list[UUID] | None = None) -> dict: ...
 
     @abstractmethod
     async def get_pending_follow_ups(

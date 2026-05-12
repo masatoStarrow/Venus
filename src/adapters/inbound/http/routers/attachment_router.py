@@ -39,32 +39,47 @@ router = APIRouter(
 # ── Helper ───────────────────────────────────────────────────────────────
 
 
-async def _verify_comercial_owns_interaction(
+async def _get_comercial_owned_client_ids(
+    user: UserContext,
+    db: AsyncSession,
+) -> list[UUID]:
+    from src.infrastructure.di.container import get_interaction_repository
+    repo = get_interaction_repository(db)
+    return await repo.get_owned_client_ids(user.user_id)
+
+
+async def _verify_comercial_can_read_interaction(
     interaction_id: UUID,
     user: UserContext,
     db: AsyncSession,
 ) -> JSONResponse | None:
-    """Verify that a comercial user owns the interaction. Returns 403 if not owned."""
     if user.role != UserRole.COMERCIAL:
         return None
-
     get_uc = get_get_interaction_use_case(db)
     try:
         interaction = await get_uc.execute(interaction_id)
     except InteractionNotFoundError:
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content=error_response("NOT_FOUND", "Interacción no encontrada"),
-        )
+        return JSONResponse(status_code=404, content=error_response("NOT_FOUND", "Interacción no encontrada"))
+    owned = await _get_comercial_owned_client_ids(user, db)
+    if interaction.client_id not in owned:
+        return JSONResponse(status_code=403, content=error_response("FORBIDDEN", "Comercial solo puede acceder a interacciones de sus clientes asignados"))
+    return None
 
+
+async def _verify_comercial_can_write_interaction(
+    interaction_id: UUID,
+    user: UserContext,
+    db: AsyncSession,
+) -> JSONResponse | None:
+    if user.role != UserRole.COMERCIAL:
+        return None
+    get_uc = get_get_interaction_use_case(db)
+    try:
+        interaction = await get_uc.execute(interaction_id)
+    except InteractionNotFoundError:
+        return JSONResponse(status_code=404, content=error_response("NOT_FOUND", "Interacción no encontrada"))
     if interaction.agent_id != user.user_id:
-        return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content=error_response(
-                "FORBIDDEN", "Comercial solo puede acceder a sus propias interacciones"
-            ),
-        )
-
+        return JSONResponse(status_code=403, content=error_response("FORBIDDEN", "Comercial solo puede modificar sus propias interacciones"))
     return None
 
 
@@ -83,8 +98,7 @@ async def upload_attachment(
     user: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verificar ownership para comercial
-    forbidden = await _verify_comercial_owns_interaction(interaction_id, user, db)
+    forbidden = await _verify_comercial_can_write_interaction(interaction_id, user, db)
     if forbidden:
         return forbidden
 
@@ -134,8 +148,7 @@ async def list_attachments(
     user: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verificar ownership para comercial
-    forbidden = await _verify_comercial_owns_interaction(interaction_id, user, db)
+    forbidden = await _verify_comercial_can_read_interaction(interaction_id, user, db)
     if forbidden:
         return forbidden
 
@@ -168,8 +181,7 @@ async def download_attachment(
     user: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verificar ownership para comercial
-    forbidden = await _verify_comercial_owns_interaction(interaction_id, user, db)
+    forbidden = await _verify_comercial_can_read_interaction(interaction_id, user, db)
     if forbidden:
         return forbidden
 
@@ -209,8 +221,7 @@ async def delete_attachment(
     user: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verificar ownership para comercial (defense-in-depth)
-    forbidden = await _verify_comercial_owns_interaction(interaction_id, user, db)
+    forbidden = await _verify_comercial_can_write_interaction(interaction_id, user, db)
     if forbidden:
         return forbidden
 

@@ -54,7 +54,7 @@ src/
 | `DELETE` | `/api/v1/interactions/{id}/attachments/{att_id}` | Eliminar adjunto (S3 + BD) | Todos |
 | `GET` | `/api/v1/health/` | Health check | Público |
 
-> \* Comercial solo ve interacciones donde es el agente asignado.
+> \* Comercial ve todas las interacciones de clientes donde tiene al menos una interacción propia ("clientes asignados"). Para escritura (editar, cerrar, subir/borrar adjuntos), comercial solo puede modificar sus propias interacciones. Follow-ups son siempre propios.
 
 ## Parámetros de Filtrado
 

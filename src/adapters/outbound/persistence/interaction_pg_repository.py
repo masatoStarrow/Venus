@@ -52,6 +52,7 @@ class InteractionPgRepository(InteractionRepository):
         *,
         client_id=None,
         agent_id=None,
+        client_ids=None,
         type_filter=None,
         channel_filter=None,
         status_filter=None,
@@ -62,6 +63,8 @@ class InteractionPgRepository(InteractionRepository):
             stmt = stmt.where(InteractionModel.client_id == client_id)
         if agent_id is not None:
             stmt = stmt.where(InteractionModel.agent_id == agent_id)
+        if client_ids is not None:
+            stmt = stmt.where(InteractionModel.client_id.in_(client_ids))
         if type_filter:
             stmt = stmt.where(InteractionModel.type.in_(type_filter))
         if channel_filter:
@@ -91,11 +94,23 @@ class InteractionPgRepository(InteractionRepository):
         result = await self._session.get(InteractionModel, interaction_id)
         return self._to_entity(result) if result else None
 
+    async def get_owned_client_ids(self, agent_id: UUID) -> list[UUID]:
+        stmt = (
+            select(InteractionModel.client_id.distinct())
+            .where(
+                InteractionModel.agent_id == agent_id,
+                InteractionModel.is_deleted == False,  # noqa: E712
+            )
+        )
+        result = await self._session.execute(stmt)
+        return [row[0] for row in result.all()]
+
     async def list_interactions(
         self,
         *,
         client_id=None,
         agent_id=None,
+        client_ids=None,
         type_filter=None,
         channel_filter=None,
         status_filter=None,
@@ -112,6 +127,7 @@ class InteractionPgRepository(InteractionRepository):
             base,
             client_id=client_id,
             agent_id=agent_id,
+            client_ids=client_ids,
             type_filter=type_filter,
             channel_filter=channel_filter,
             status_filter=status_filter,
@@ -338,10 +354,12 @@ class InteractionPgRepository(InteractionRepository):
             "open_tickets": row.open_tickets or 0,
         }
 
-    async def get_metrics(self, *, agent_id: UUID | None = None) -> dict:
+    async def get_metrics(self, *, agent_id: UUID | None = None, client_ids: list[UUID] | None = None) -> dict:
         base_where = InteractionModel.is_deleted == False  # noqa: E712
         if agent_id is not None:
             base_where = and_(base_where, InteractionModel.agent_id == agent_id)
+        if client_ids is not None:
+            base_where = and_(base_where, InteractionModel.client_id.in_(client_ids))
 
         # Global aggregates
         stmt = select(

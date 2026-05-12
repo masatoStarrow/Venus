@@ -49,6 +49,7 @@ from src.infrastructure.di.container import (
     get_list_pending_follow_ups_use_case,
     get_list_overdue_follow_ups_use_case,
     get_get_audit_log_use_case,
+    get_interaction_repository,
 )
 
 router = APIRouter(prefix="/api/v1/interactions", tags=["Interactions"])
@@ -68,36 +69,42 @@ def _interaction_json(entity) -> dict:
     return InteractionResponse.model_validate(entity.__dict__).model_dump(mode="json")
 
 
-async def _verify_comercial_owns_interaction(
-    interaction_id: UUID,
+async def _get_comercial_owned_client_ids(
     context: UserContext,
     db: AsyncSession,
+) -> list[UUID]:
+    repo = get_interaction_repository(db)
+    return await repo.get_owned_client_ids(context.user_id)
+
+
+def _verify_comercial_owns_interaction_for_read(
+    interaction,
+    owned_client_ids: list[UUID],
 ) -> JSONResponse | None:
-    """
-    Verify that a comercial user owns the interaction.
-    Returns a 403 JSONResponse if not owned, or None if access is allowed.
-    Non-comercial roles always pass (returns None).
-    """
+    if interaction.client_id not in owned_client_ids:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content=error_response(
+                "FORBIDDEN", "Comercial solo puede acceder a interacciones de sus clientes asignados"
+            ),
+        )
+    return None
+
+
+def _verify_comercial_owns_interaction_for_write(
+    interaction_id: UUID,
+    context: UserContext,
+    interaction,
+) -> JSONResponse | None:
     if context.role != UserRole.COMERCIAL:
         return None
-
-    get_uc = get_get_interaction_use_case(db)
-    try:
-        interaction = await get_uc.execute(interaction_id)
-    except InteractionNotFoundError:
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content=error_response("NOT_FOUND", "Interacción no encontrada"),
-        )
-
     if interaction.agent_id != context.user_id:
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
             content=error_response(
-                "FORBIDDEN", "Comercial solo puede acceder a sus propias interacciones"
+                "FORBIDDEN", "Comercial solo puede modificar sus propias interacciones"
             ),
         )
-
     return None
 
 
@@ -117,8 +124,11 @@ async def get_metrics(
     db: AsyncSession = Depends(get_db),
 ):
     use_case = get_get_metrics_use_case(db)
-    agent_id = context.user_id if context.role == UserRole.COMERCIAL else None
-    result = await use_case.execute(agent_id=agent_id)
+    if context.role == UserRole.COMERCIAL:
+        owned = await _get_comercial_owned_client_ids(context, db)
+        result = await use_case.execute(client_ids=owned)
+    else:
+        result = await use_case.execute()
     data = MetricsResponse(**result).model_dump()
     return success_response(data)
 
@@ -195,7 +205,11 @@ async def list_by_client(
     db: AsyncSession = Depends(get_db),
 ):
     use_case = get_list_by_client_use_case(db)
-    forced_agent = context.user_id if context.role == UserRole.COMERCIAL else None
+    forced_agent = None
+    if context.role == UserRole.COMERCIAL:
+        owned = await _get_comercial_owned_client_ids(context, db)
+        if client_id not in owned:
+            return paginated_response(items=[], total=0, page=page, page_size=page_size)
     items, total = await use_case.execute(
         client_id,
         agent_id=forced_agent,
@@ -230,7 +244,14 @@ async def get_client_summary(
     db: AsyncSession = Depends(get_db),
 ):
     use_case = get_get_client_summary_use_case(db)
-    agent_id = context.user_id if context.role == UserRole.COMERCIAL else None
+    agent_id = None
+    if context.role == UserRole.COMERCIAL:
+        owned = await _get_comercial_owned_client_ids(context, db)
+        if client_id not in owned:
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content=error_response("FORBIDDEN", "Comercial solo puede ver resumen de sus clientes asignados"),
+            )
     result = await use_case.execute(client_id, agent_id=agent_id)
     data = ClientSummaryResponse(**result).model_dump(mode="json")
     return success_response(data)
@@ -264,10 +285,13 @@ async def list_interactions(
     db: AsyncSession = Depends(get_db),
 ):
     use_case = get_list_interactions_use_case(db)
-    forced_agent = context.user_id if context.role == UserRole.COMERCIAL else None
+    owned_client_ids = None
+    if context.role == UserRole.COMERCIAL:
+        owned_client_ids = await _get_comercial_owned_client_ids(context, db)
     items, total = await use_case.execute(
         client_id=client_id,
-        agent_id=forced_agent,
+        agent_id=None,
+        client_ids=owned_client_ids,
         type_filter=_split_csv(type),
         channel_filter=_split_csv(channel),
         status_filter=_split_csv(client_status),
@@ -341,9 +365,11 @@ async def get_interaction(
             content=error_response(e.code, e.message),
         )
 
-    forbidden = await _verify_comercial_owns_interaction(interaction_id, context, db)
-    if forbidden:
-        return forbidden
+    if context.role == UserRole.COMERCIAL:
+        owned = await _get_comercial_owned_client_ids(context, db)
+        forbidden = _verify_comercial_owns_interaction_for_read(interaction, owned)
+        if forbidden:
+            return forbidden
 
     data = _interaction_json(interaction)
     return success_response(data)
@@ -364,7 +390,16 @@ async def update_interaction(
     context: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
-    forbidden = await _verify_comercial_owns_interaction(interaction_id, context, db)
+    get_uc = get_get_interaction_use_case(db)
+    try:
+        interaction = await get_uc.execute(interaction_id)
+    except InteractionNotFoundError:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=error_response("INTERACTION_NOT_FOUND", "Interacción no encontrada"),
+        )
+
+    forbidden = _verify_comercial_owns_interaction_for_write(interaction_id, context, interaction)
     if forbidden:
         return forbidden
 
@@ -449,7 +484,16 @@ async def close_interaction(
     context: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
-    forbidden = await _verify_comercial_owns_interaction(interaction_id, context, db)
+    get_uc = get_get_interaction_use_case(db)
+    try:
+        interaction = await get_uc.execute(interaction_id)
+    except InteractionNotFoundError:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=error_response("INTERACTION_NOT_FOUND", "Interacción no encontrada"),
+        )
+
+    forbidden = _verify_comercial_owns_interaction_for_write(interaction_id, context, interaction)
     if forbidden:
         return forbidden
 
@@ -489,7 +533,6 @@ async def get_audit_log(
     context: UserContext = Depends(get_current_user_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verificar que la interacción existe
     get_uc = get_get_interaction_use_case(db)
     try:
         interaction = await get_uc.execute(interaction_id)
@@ -501,15 +544,11 @@ async def get_audit_log(
             ),
         )
 
-    # Verificar ownership para comercial
-    if context.role == UserRole.COMERCIAL and interaction.agent_id != context.user_id:
-        return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content=error_response(
-                "FORBIDDEN",
-                "Comercial solo puede ver auditoría de sus propias interacciones",
-            ),
-        )
+    if context.role == UserRole.COMERCIAL:
+        owned = await _get_comercial_owned_client_ids(context, db)
+        forbidden = _verify_comercial_owns_interaction_for_read(interaction, owned)
+        if forbidden:
+            return forbidden
 
     audit_uc = get_get_audit_log_use_case(db)
     entries = await audit_uc.execute(interaction_id)

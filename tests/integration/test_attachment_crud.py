@@ -14,8 +14,10 @@ import pytest
 from tests.conftest import (
     ADMIN_ID,
     CLIENT_A_ID,
+    CLIENT_B_ID,
     INTERNAL_HEADERS_ADMIN,
     INTERNAL_HEADERS_COMERCIAL,
+    _interaction_payload,
 )
 
 
@@ -197,12 +199,10 @@ async def test_upload_attachment_comercial_forbidden_if_not_own(client):
 
 @pytest.mark.asyncio
 async def test_list_attachments_comercial_forbidden_if_not_own(client):
-    """Comercial cannot list attachments of another user's interactions."""
-    # Create interaction as admin
+    """Comercial cannot list attachments if they have no relationship with the client."""
     iid = await _create_interaction(client)
     await _upload_file(client, iid)
 
-    # Comercial tries to list → 403
     resp = await client.get(
         f"{BASE}/{iid}/attachments/",
         headers=INTERNAL_HEADERS_COMERCIAL,
@@ -212,15 +212,53 @@ async def test_list_attachments_comercial_forbidden_if_not_own(client):
 
 @pytest.mark.asyncio
 async def test_download_attachment_comercial_forbidden_if_not_own(client):
-    """Comercial cannot download attachments from another user's interactions."""
-    # Create interaction as admin and upload file
+    """Comercial cannot download attachments if they have no relationship with the client."""
     iid = await _create_interaction(client)
     upload_resp = await _upload_file(client, iid)
     att_id = upload_resp.json()["data"]["id"]
 
-    # Comercial tries to download → 403
     resp = await client.get(
         f"{BASE}/{iid}/attachments/{att_id}/download",
         headers=INTERNAL_HEADERS_COMERCIAL,
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_attachments_comercial_allowed_for_owned_client(client):
+    """Comercial can list attachments for owned client interactions."""
+    # Comercial creates interaction for CLIENT_A (establishes ownership)
+    comercial_payload = _interaction_payload(subject="Comercial owns this client")
+    await client.post(f"{BASE}/", json=comercial_payload, headers=INTERNAL_HEADERS_COMERCIAL)
+
+    # Admin creates interaction for CLIENT_A and uploads file
+    iid = await _create_interaction(client)
+    await _upload_file(client, iid)
+
+    # Comercial can list → 200
+    resp = await client.get(
+        f"{BASE}/{iid}/attachments/",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()["data"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_download_attachment_comercial_allowed_for_owned_client(client):
+    """Comercial can download attachments for owned client interactions."""
+    # Comercial creates interaction for CLIENT_A (establishes ownership)
+    comercial_payload = _interaction_payload(subject="Comercial owns this client")
+    await client.post(f"{BASE}/", json=comercial_payload, headers=INTERNAL_HEADERS_COMERCIAL)
+
+    # Admin creates interaction for CLIENT_A and uploads file
+    iid = await _create_interaction(client)
+    upload_resp = await _upload_file(client, iid)
+    att_id = upload_resp.json()["data"]["id"]
+
+    # Comercial can download → 200
+    resp = await client.get(
+        f"{BASE}/{iid}/attachments/{att_id}/download",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert resp.status_code == 200

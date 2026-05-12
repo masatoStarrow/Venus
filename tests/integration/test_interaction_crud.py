@@ -515,3 +515,132 @@ async def test_audit_log_records_changes_from_comercial_update(client: AsyncClie
     comercial_user_id = INTERNAL_HEADERS_COMERCIAL["X-User-Id"]
     for entry in entries:
         assert entry["edited_by"] == comercial_user_id
+
+
+# ── Comercial owned-client READ access tests ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_comercial_can_read_other_agents_interaction_for_owned_client(
+    client: AsyncClient,
+):
+    """Comercial can view another agent's interaction if they share the same client."""
+    from tests.conftest import CLIENT_A_ID
+
+    # Comercial creates interaction for CLIENT_A (establishes ownership)
+    await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Comercial owns this client"),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+
+    # Admin creates another interaction for CLIENT_A
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Admin interaction for same client"),
+        headers=INTERNAL_HEADERS_ADMIN,
+    )
+    admin_interaction_id = create_r.json()["data"]["id"]
+
+    # Comercial can read admin's interaction → 200
+    response = await client.get(
+        f"/api/v1/interactions/{admin_interaction_id}",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["id"] == admin_interaction_id
+
+
+@pytest.mark.asyncio
+async def test_comercial_cannot_read_interaction_for_unowned_client(
+    client: AsyncClient,
+):
+    """Comercial cannot view interactions for a client they have no relationship with."""
+    from tests.conftest import CLIENT_B_ID
+
+    # Comercial creates interaction for CLIENT_A (NOT CLIENT_B)
+    await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Comercial owns CLIENT_A"),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+
+    # Admin creates interaction for CLIENT_B
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(
+            client_id=str(CLIENT_B_ID),
+            subject="Admin interaction for CLIENT_B",
+        ),
+        headers=INTERNAL_HEADERS_ADMIN,
+    )
+    client_b_interaction_id = create_r.json()["data"]["id"]
+
+    # Comercial cannot read CLIENT_B interaction → 403
+    response = await client.get(
+        f"/api/v1/interactions/{client_b_interaction_id}",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_comercial_can_see_audit_for_owned_client_interaction(
+    client: AsyncClient,
+):
+    """Comercial can view audit of another agent's interaction if they share the same client."""
+    # Comercial creates interaction for CLIENT_A (establishes ownership)
+    await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Comercial owns this client"),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+
+    # Admin creates and updates interaction for CLIENT_A
+    create_r = await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Admin interaction for same client"),
+        headers=INTERNAL_HEADERS_ADMIN,
+    )
+    admin_interaction_id = create_r.json()["data"]["id"]
+    await client.put(
+        f"/api/v1/interactions/{admin_interaction_id}",
+        json={"subject": "Updated by admin"},
+        headers=INTERNAL_HEADERS_ADMIN,
+    )
+
+    # Comercial can read audit → 200
+    response = await client.get(
+        f"/api/v1/interactions/{admin_interaction_id}/audit",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_comercial_list_interactions_shows_all_for_owned_clients(
+    client: AsyncClient,
+):
+    """Comercial list includes all interactions for clients they own, not just their own."""
+    # Comercial creates interaction for CLIENT_A
+    await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Comercial interaction"),
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+
+    # Admin creates interaction for CLIENT_A
+    await client.post(
+        "/api/v1/interactions/",
+        json=_interaction_payload(subject="Admin interaction"),
+        headers=INTERNAL_HEADERS_ADMIN,
+    )
+
+    # Comercial lists interactions → sees both
+    response = await client.get(
+        "/api/v1/interactions/",
+        headers=INTERNAL_HEADERS_COMERCIAL,
+    )
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert len(items) == 2
