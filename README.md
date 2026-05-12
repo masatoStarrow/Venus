@@ -37,24 +37,24 @@ src/
 | Método | Ruta | Descripción | Roles |
 |--------|------|-------------|-------|
 | `GET` | `/api/v1/interactions/` | Listar interacciones (filtros, paginación) | Todos* |
-| `POST` | `/api/v1/interactions/` | Crear interacción | Admin, Soporte |
+| `POST` | `/api/v1/interactions/` | Crear interacción | Todos |
 | `GET` | `/api/v1/interactions/metrics` | Métricas globales (incluye desglose por cliente) | Todos* |
 | `GET` | `/api/v1/interactions/follow-ups/pending` | Seguimientos pendientes | Todos |
 | `GET` | `/api/v1/interactions/follow-ups/overdue` | Seguimientos vencidos | Todos |
 | `GET` | `/api/v1/interactions/client/{id}` | Historial de cliente | Todos* |
 | `GET` | `/api/v1/interactions/client/{id}/summary` | Resumen de cliente | Todos* |
-| `GET` | `/api/v1/interactions/{id}` | Detalle de interacción | Todos |
-| `PUT` | `/api/v1/interactions/{id}` | Actualizar interacción | Admin, Soporte |
+| `GET` | `/api/v1/interactions/{id}` | Detalle de interacción | Todos* |
+| `PUT` | `/api/v1/interactions/{id}` | Actualizar interacción | Todos* |
 | `DELETE` | `/api/v1/interactions/{id}` | Eliminar (soft delete) | Admin |
-| `PATCH` | `/api/v1/interactions/{id}/close` | Cerrar interacción | Admin, Soporte |
-| `GET` | `/api/v1/interactions/{id}/audit` | Historial de cambios | Todos |
-| `POST` | `/api/v1/interactions/{id}/attachments/` | Subir adjunto (multipart) | Todos |
-| `GET` | `/api/v1/interactions/{id}/attachments/` | Listar adjuntos | Todos |
-| `GET` | `/api/v1/interactions/{id}/attachments/{att_id}/download` | URL presignada de descarga | Todos |
-| `DELETE` | `/api/v1/interactions/{id}/attachments/{att_id}` | Eliminar adjunto (S3 + BD) | Todos |
+| `PATCH` | `/api/v1/interactions/{id}/close` | Cerrar interacción | Todos* |
+| `GET` | `/api/v1/interactions/{id}/audit` | Historial de cambios | Todos* |
+| `POST` | `/api/v1/interactions/{id}/attachments/` | Subir adjunto (multipart) | Todos* |
+| `GET` | `/api/v1/interactions/{id}/attachments/` | Listar adjuntos | Todos* |
+| `GET` | `/api/v1/interactions/{id}/attachments/{att_id}/download` | URL presignada de descarga | Todos* |
+| `DELETE` | `/api/v1/interactions/{id}/attachments/{att_id}` | Eliminar adjunto (S3 + BD) | Todos* |
 | `GET` | `/api/v1/health/` | Health check | Público |
 
-> \* Comercial ve todas las interacciones de clientes donde tiene al menos una interacción propia ("clientes asignados"). Para escritura (editar, cerrar, subir/borrar adjuntos), comercial solo puede modificar sus propias interacciones. Follow-ups son siempre propios.
+> \* Comercial ve todas las interacciones de clientes donde tiene al menos una interacción propia ("clientes asignados"). Para escritura (editar, cerrar, subir/borrar adjuntos), comercial solo puede modificar sus propias interacciones. Follow-ups pendientes son siempre propios. Los vencidos muestran todos para Admin/Soporte, y solo los propios para Comercial.
 
 ## Parámetros de Filtrado
 
@@ -62,7 +62,7 @@ src/
 GET /api/v1/interactions/?type=call,email&status=pending&channel=phone
     &date_from=2026-01-01T00:00:00Z&date_to=2026-12-31T23:59:59Z
     &order_by=interaction_date&order_dir=desc
-    &page=1&page_size=20
+    &page=1&page_size=20&client_id=<uuid>
 ```
 
 ## Respuestas Clave
@@ -208,8 +208,9 @@ pytest tests/integration/ -v
 | `DB_NAME` | Nombre de la BD | `crm_interactions_db` |
 | `APP_PORT` | Puerto del servicio | `8002` |
 | `LOG_LEVEL` | Nivel de logging | `INFO` |
-| `POOL_SIZE` | Pool de conexiones | `5` |
-| `POOL_MAX_OVERFLOW` | Overflow del pool | `10` |
+| `DB_POOL_SIZE` | Pool de conexiones | `10` |
+| `DB_MAX_OVERFLOW` | Overflow del pool | `20` |
+| `APP_ENV` | Entorno de ejecución | `local` |
 | `S3_BUCKET` | Bucket S3 para adjuntos | — |
 | `S3_REGION` | Región AWS | `us-east-1` |
 | `S3_ENDPOINT_URL` | Endpoint custom (LocalStack, MinIO) | — |
