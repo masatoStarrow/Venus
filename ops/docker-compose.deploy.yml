@@ -1,0 +1,21 @@
+services:
+  interactions-service:
+    image: ${IMAGE_TAG}
+    container_name: venus-interactions-service
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8002}:8002"
+    env_file: .env.${DEPLOY_ENV:-production}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/api/v1/health/')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    networks:
+      - crm
+
+networks:
+  crm:
+    name: crm-${DEPLOY_ENV:-production}
+    external: true
