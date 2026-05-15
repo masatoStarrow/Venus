@@ -24,7 +24,7 @@ class InteractionModel(Base):
         String(20), nullable=False, default="pending", server_default=text("'pending'")
     )
 
-    subject: Mapped[str] = mapped_column(String(500), nullable=False)
+    subject: Mapped[str] = mapped_column(String(200), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     internal_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     outcome: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -5,7 +5,7 @@ Pydantic v2 schemas for Interaction request/response.
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.domain.value_objects.channel import Channel
 from src.domain.value_objects.interaction_status import InteractionStatus
@@ -18,7 +18,7 @@ class CreateInteractionRequest(BaseModel):
     client_id: UUID
     type: InteractionType
     channel: Channel
-    subject: str = Field(..., min_length=3, max_length=500, description="Asunto o título")
+    subject: str = Field(..., min_length=3, max_length=200, description="Asunto o título")
     status: InteractionStatus = InteractionStatus.PENDING
     notes: str | None = None
     internal_notes: str | None = None
@@ -27,17 +27,36 @@ class CreateInteractionRequest(BaseModel):
     follow_up_date: datetime | None = None
     duration_minutes: int | None = Field(None, ge=1, le=600)
 
+    @field_validator("subject")
+    @classmethod
+    def validate_subject(cls, v: str) -> str:
+        if len(v) > 200:
+            raise ValueError("El asunto no puede tener más de 200 caracteres")
+        if len(v.strip()) < 3:
+            raise ValueError("El asunto debe tener al menos 3 caracteres")
+        return v
+
 
 class UpdateInteractionRequest(BaseModel):
     type: InteractionType | None = None
     channel: Channel | None = None
     status: InteractionStatus | None = None
-    subject: str | None = Field(None, min_length=3, max_length=500)
+    subject: str | None = Field(None, min_length=3, max_length=200)
     notes: str | None = None
     internal_notes: str | None = None
     outcome: str | None = Field(None, max_length=255)
     follow_up_date: datetime | None = None
     duration_minutes: int | None = Field(None, ge=1, le=600)
+
+    @field_validator("subject")
+    @classmethod
+    def validate_subject(cls, v: str | None) -> str | None:
+        if v is not None:
+            if len(v) > 200:
+                raise ValueError("El asunto no puede tener más de 200 caracteres")
+            if len(v.strip()) < 3:
+                raise ValueError("El asunto debe tener al menos 3 caracteres")
+        return v
 
 
 class CloseInteractionRequest(BaseModel):
